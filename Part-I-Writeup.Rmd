@@ -1,0 +1,316 @@
+---
+title: "Part I: Simple Model "
+author: "Linlin Li, Bingruo Wu, Cole Juracek, Vidvat Ramachandran"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(GGally)
+library(ggpubr)
+library(knitr)
+```
+
+```{r read-data, echo=FALSE}
+load("paintings_train.Rdata")
+load("paintings_test.Rdata")
+```
+
+# Introduction
+
+For this project, we are being asked to explain which factors played an important role on a selection of paintings sold in Paris in the late 18th century. We will use these factors to identify undervalued/overvalued paintings in the dataset. To facilitate this, we have been provided with auction price data from 1764-1780 containing information on painting/artist characteristics and the sale itself. First, we will use EDA to get to know the data. This will help us get an initial sense of which variables are associated with price, and which variables to include in our preliminary models.
+
+After EDA is complete, we will move on to the model building portion of the analysis. Using the important variables identified in EDA, we will create a multiple linear regression model attempting to explain price as a function of these covariates. After considering potential interactions between the selectors, we will try to further improve/simplify our model via variable selection with AIC/BIC. Finally, we will validate our model by checking the assumptions of linear regression, and assert that we have not made any major violations. How well our model performs will be a result of several factors:
+
+- Does our model correctly capture what the true connection between variables and price is? I.e., does our model have low bias?
+- How well does our model fit the data relative to the null model? A common metric for this is the root mean squared error (RMSE), which is a function of the residuals of our model. We are looking for a low RMSE on "new" data (the test dataset).
+- Does our model perform well on new data? I.e., does our model have low variance? If we add too many predictors, we risk overfitting our model to the training data and jeopardizing performance on new data.
+- Does our model "cover" the predictions well? From our model, we can create prediction intervals for where we expect the price to fall. We would like the true value to be covered most, but not all of the time. If we're covering the true value all of the time, our prediction intervals are too wide, and our prediction intervals are not as precise as we would like.
+
+After our analysis with linear regression, we will proceed forward with a more complicated model. This will be contained in the subsequent writeup.
+
+# EDA
+
+To begin with the EDA, first we got a summary of the variables and discard any unneeded portions. Our response variable is `logprice`. As such, we will not use `price` in our analysis. `count` is a column of all 1's, and provides no value.
+
+## Investigating Binary Variables
+
+Next, we note that a large amount of the variables are binary. We can investigate the association with price via boxplots:
+
+```{r boxplots, warning = F, echo=FALSE, fig.cap="Boxplots between logprice and some binary variables"}
+paintings_train %>%
+  gather(diff_origin,engraved,prevcoll,paired,finished,lrgfont,lands_sc,lands_elem,Interm,
+         othgenre,portrait,still_life,discauth,key = "var",value = "value") %>%
+  ggplot(aes(group = value,y = logprice, x = value)) +
+  geom_boxplot(na.rm = T) +
+  facet_wrap(~ var, scales = "free") +
+  theme_bw() + xlab(label = "")
+```
+
+***Figure 1*** provide a great visualization on how a given binary variable is associated with changes in logprice. It's hard to quantify how much of a difference in price should warrant variable inclusion, but as we will be performing variable selection later, it shouldn't hurt to include more than necessary. We see the following potential predictors from the graphs:
+
+- `prevcoll`
+- `lrgfont`
+- `diff_origin`
+- `finished`
+- `engraved`
+- `lands_sc`
+- `portrait`
+- `paired`
+- `still_life`
+- `lands_elem`
+- `Interm`
+- `figures`
+- `discauth`
+- `othgenre`
+
+We note that many of these binary variables seem to be strongly associated with `logprice`, so we will consider them further when we are building the initial model.
+
+The variable `Interm` has many missing values corresponding to the winning bidder being "Unknown", and we found that including that "missingness" as a level, the logprice was lower than the when we know whether there is an intermediary or not. Surprisingly, for the same observations, `type_intermed` is just blank, same as when `Interm` is 0, not missing. So we can just use `type_intermed` instead of `Interm` and assume that the blanks in place of NAs are imputations, or maybe that's how it was supposed to be coded.
+
+We also note that the variable `peasant` and `othgenre` are like two levels of a factor(they cannot be 1 together as described in the codebook, and both describe the scene of the painting). So, while we don't think `peasant` has any significant impact on `logprice`, we may include it anyway.
+
+## Investigating categorical variables
+
+Several variables have multiple categories (country origin, type of endbuyer, etc.). We can visualize these with box plots, there will just be more boxes than a binary variable.
+
+```{r boxplots for categorical vars, warning = F, echo=FALSE, fig.cap="Boxplots between logprice and some categorical variables"}
+paintings_train %>%
+  gather(dealer,origin_author,origin_cat,school_pntg,winningbiddertype,mat,type_intermed, key = "var",value = "value") %>%
+  ggplot(aes(group = value,y = logprice, x = value)) +
+  geom_boxplot() +
+  facet_wrap(~ var, scales = "free") +
+  theme_bw() + xlab("")
+```
+
+```{r boxplots for year, warning = F, echo=FALSE, fig.cap="Boxplots between logprice and year", fig.height=4, fig.width=6}
+paintings_train %>%
+  gather(year, key = "var",value = "value") %>%
+  ggplot(aes(group = value,y = logprice, x = value)) +
+  geom_boxplot() +
+  facet_wrap(~ var, scales = "free") +
+  theme_bw() + xlab("year")
+```
+
+Several of the categories for variables have very small sample sizes, and as such cannot be used for our analysis (`mat`, `school_pntg`, `winningbiddertype`, `type_intermed`). The other variables initially seem feasible. It would make sense that nationality could be an important factor; perhaps certain countries are known more for their art. Similarly, it makes sense that `year` could be associated with price. Perhaps based on the economic circumstances, people would be more willing to spend different amounts of money on art. There doesn't seem to be a linear trend, however, so we will need to treat `year` as a categorical variable rather than numeric.  
+
+We will also choose only `origin_author` from `origin_author`, `origin_cat` and `school_pntg`, because they are likely to be the same in many observations and out of the three, `origin_author` has all the categories and has reasonable amount of observations for each category compared to `school_pntg`.
+
+## Continuous Variables
+
+Finally, certain variables are continuous in nature. We can investigate the relationship with price via scatterplots.
+
+* Note: For the `position` variable, there were a few observations whose values were not between 0 and 1. We assumed this was an error caused by percentage being entered instead of fractions. These values were corrected by dividing by 100.
+
+```{r data preprocess, echo=FALSE}
+# clean position(Only R1771 has position more than 1)
+ind <- which(paintings_train$sale == "R1771")
+paintings_train$position[ind] <- paintings_train$position[ind]/100
+# test
+ind <- which(paintings_test$sale == "R1771")
+paintings_test$position[ind] <- paintings_test$position[ind]/100
+```
+
+```{r scatterplots of logprice with those continuous varaibles, message=FALSE, warning = F, echo=FALSE, fig.height=4, fig.width=8, fig.cap="Scatterplots between logprice and position as well as log(Surface)"}
+ggs <- ggpairs(data = paintings_train %>% mutate(logSurface = log(Surface)), columns = c(3,29,10), progress = F)
+pts <- lapply(1:2, function(x) getPlot(ggs,3,x))
+ggarrange(plotlist = pts)
+```
+
+In no way does `position` seem to be associated with price, so we will not consider it further. We expected `Surface` to play a much larger role in price. Bigger paintings have more expensive materials and take artists longer to finish. We see from the graph, however, that there is only a very slight increase in `logprice` as `Surface` increases. As such, we will not include for now as it doesn't seem to be as related as the other variables. Additionally, the test data contains several NA values for `Surface` compared to the other variables, and improper imputation could be misleading.
+
+## EDA between Predictors
+
+Apart from the EDA for the predictors vs. `logprice`, on looking at the relationships between the predictors, we found a few things which seem important:
+
+- Only dealer "R" can have `lrgfont` = 1. It also looks like the dealer is most likely "R" when `engraved` or `prevcoll` are 1.
+- The variable `lands_sc` and `lands_elem` are never 1 together in the training data, but there very few cases in the test data. We observe the same in the variables `portrait` and `still_life`.
+- There is only one observation with `type_intermed` "EB" along with `winningbiddertype` being "EBC", same is the case in test data. Since, there is only one observation of "EB", it will be difficult to use `type_intermed` unless we change something.
+- Whenever there is an intermediary involved, the end buyer is most likely a collector.
+- The dealers are not dealing each year, every dealer has certain years where they sell paintings, in other years, they don't. This is observed in both the training and the test data.
+
+## Variable Exclusion
+
+Further explanation of why certain variables were included/excluded are included in the formal modal analysis below. For brevity, they will not be included here.
+
+# Development and Assessment of Initial Model
+
+## Initial Model
+
+Before we start building a model, we first first convert a few variable to factor(the binary variables and year), and then we change the category "EB" to "E" for the variable `type_intermed`, because we have only one observation with that category. We change it to "E" because the primary is an expert.
+
+```{r modify dataset, include=FALSE}
+inds <- unlist(map(paintings_train, function(pred){
+  if(is.numeric(pred)){
+    if(all(pred == 1 | pred == 0 | is.na(pred)))
+      return(TRUE)
+    else
+      return(FALSE)
+  }
+  else
+    return(FALSE)
+}))
+# numeric binary to factors
+paintings_train[inds] <- map_df(paintings_train[inds], as.factor)
+paintings_test[inds] <- map_df(paintings_test[inds], as.factor)
+
+# year to factors
+paintings_train$year <- as.factor(paintings_train$year)
+paintings_test$year <- as.factor(paintings_test$year)
+
+# Converting type_intermed "EB" to "E"
+ind_tmp <- which(paintings_train$type_intermed == "EB")
+paintings_train$type_intermed[ind_tmp] <- "E"
+ind_tmp <- which(paintings_test$type_intermed == "EB")
+paintings_test$type_intermed[ind_tmp] <- "E"
+```
+
+## Model Selection
+
+From the EDA, we first considered all of the variables deemed important, along with interactions we thought would be important. We thought certain binary features may/may not be as important depending on the type of buyer. Certain interactions could relate to all people involved (dealer, endbuyer, and potential intermediaries), while other interactions really only seem relevant to the buyers (endbuyer and intermediary only).
+
+```{r initial model, echo=FALSE}
+model1 = lm(logprice ~ (dealer + endbuyer + type_intermed)*(diff_origin + discauth + lrgfont + engraved + prevcoll + paired) + (endbuyer + type_intermed)*(figures + finished + portrait + still_life + peasant + othgenre + lands_sc + lands_elem) + year + origin_author, data = paintings_train)
+summary(model1)
+```
+
+However, this is far too many variables; many of these are likely noise and aren't truly associated with price. We can use stepwise variable selection with BIC to select the most important variables. There are several methods for reducing the number of variables, typically comparing AIC, BIC, and adjusted-R squared. We are opting for BIC because it penalizes more harshly than the other 2, and we are trying to achieve a parsimonious model for this part of our analysis. Additionally, there are also several interactions with NA components, and stepwise BIC may remove these terms. The reason for these NAs might be that there is not enough data for those specific interactions or there might be an issue of correlation present between some of the predictors.
+
+The model has an adjusted R-squared value of `r round(summary(model1)$adj.r.squared, 3)` which is acceptable, but even if it could explain a lot of the variation in the training data, we cannot say it will perform better on the test data. Also, we wouldn't want to use this model for interpretation or prediction because of the presence of NAs.
+
+```{r stepwise on the initial model, include=FALSE}
+model2 <- step(model1, k = log(nrow(paintings_train)), trace = F)
+#summary(model2)
+```
+
+While we can use the adjusted R-squared to compare between models, the most important metric is how well our model will perform on new data. A typical way to measure this is RMSE, a function of the residuals which we define below. We first see how well our model performs via the training RMSE and the coverage. Our model here should be adequate, as we are using this data to fit the model. But we also need to compute the test RMSE and coverage. If there is a drastic drop between the training and the test RMSE, we can conclude that our model is likely overfitting. We need to reduce the number of variables to get the model to generalize more to new data.
+
+```{r rmse functions, include=FALSE}
+# no exp
+rmse = function(y, ypred) {
+  rmse = sqrt(mean((y - ypred)^2))
+  return(rmse)
+}
+# exp rmse
+ermse = function(y, ypred) {
+  ermse = sqrt(mean((exp(y) - exp(ypred))^2))
+return(ermse)
+}
+# coverage
+coverage <- function(y, cl, cu){
+  mean( cl <= y & cu >= y )
+}
+```
+
+```{r pred on the training set, include=FALSE}
+# rmse on the training data
+ypred <- predict(model2, newdata = paintings_train, interval = "pred")
+ermse(ypred[,1], paintings_train$logprice)
+
+# coverage in training data
+coverage(exp(paintings_train$logprice), exp(ypred[,2]), exp(ypred[,3]) )
+```
+
+By itself, our training RMSE cannot really tell us much; we need to compare it to the test RMSE first. However, our coverage is very good. It should be ~95%, and it more or less is exactly that.
+
+However, our testing data is less good. Currently, we cannot check the test RMSE, but we can see the test coverage, which was around 65%. This is evidence of overfitting, so we would like to improve our model by removing even more variables that are not explaining the variation in price enough. We removed `year` because we found that certain dealers were only dealing in certain years, so much of the explanatory power of year was already captured by `dealer`. With `origin_author`, we simply removed it due to a lack of significance. After we removed these two variables, we ran the model on the test data and found it's still likely overfitting. 
+
+We think after looking at the data, a lot of the paintings' features look correlated with the dealers of the painting, especially `lrgfont`. So, maybe removing `dealer` from the model can help. We observed that the coverage in the test data improved, but the coverage was still much lower than on the training data.
+
+We finally removed `type_intermed` from our model and our coverage on the test data improved again. While the coverage was still much lower than on the training data, removing any more variables may bring too much bias in our model along with a low R-squared value. So, we started with a model with the `endbuyer` and its interactions with the binary variables, and then used stepwise selection with BIC to get to the final model. We find that we end up with a model with 12 predictors and no interactions.
+
+```{r reduce vars, include=FALSE}
+model3 = lm(logprice ~ (endbuyer)*(diff_origin + discauth + lrgfont + engraved + prevcoll + figures + finished + paired + portrait + still_life + peasant + othgenre + lands_sc + lands_elem), data=paintings_train)
+
+final_model = step(model3, k = log(nrow(paintings_train)), trace = F)
+```
+
+
+## Final Model Discussion
+
+Our final model is as follows:
+
+```{r summary for the final model, echo=FALSE}
+summary(final_model)
+```
+
+## Assumptions of linear regression
+
+There are several assumptions we need to investigate to determine whether our model is valid or not. We can see most of these with the following plots
+
+```{r assumptions check, echo=FALSE, fig.cap="Diagnostic plots of the final model", fig.height=8, fig.width=8}
+par(mfrow = c(2,2))
+plot(final_model)
+```
+
+Discussion: 
+
+1) From the QQ-plot, the residuals seem to be normally distributed.
+2) From the Residuals vs Fitted and Scale-Location plot, it seems that the residual can be explained well by our model.
+3) From the Residuals vs Leverage plot, it seems there are no outliers and high leverage points. 
+
+
+## Table of variables
+
+We need to exponentiate the point estimates and the confidence intervals to convert to the non-log scale of price (in livres).
+
+```{r CI for coefs, echo=FALSE}
+point_est <- coefficients(final_model)
+conf <- confint(final_model)
+model_ci <- data.frame(Fit = exp(point_est), Lower = exp(conf[,1]), Upper = exp(conf[,2]))
+kable(model_ci, digits = 3, caption = "Table of coefficients and confidence intervals")
+```
+
+
+# Summary and Conclusions
+
+The median price for the baseline category corresponds to $\exp(\beta_0)$, which is `r round(model_ci[1,1],3)` (with a 95% confidence interval of (`r round(model_ci[1,2],3)`, `r round(model_ci[1,3],3)`)). This corresponds to the median price in livres for a painting whose buyer has no information (even name), and whose is featureless for the binary variables listed above.
+
+## Important variables
+
+To find out important predictors in our model, we typically do not want to directly compare coefficient values, as these change with the scale of the predictor. However, because all of our variables are categorical (exist outside of a scale), we can in fact compare their coefficients to test for importance. Using this as our metric, the most important variables are:
+
+- `endbuyer`: type of endbuyer
+- `diff_origin`: is the painter's nationality different than listed in the catalogue?
+- `lrgfont`: does the dealer devote an additional paragraph to the painting (listed in larger font)?
+- `prevcoll`: is the previous owner mentioned?
+
+Note that our final model does not contain any interactions. This is a consequence of using the stepwise procedure to reduce model complexity.
+
+## Variable interpretation
+
+We can interpret the coefficients of the most important variables listed above as follows, keeping other predictors fixed:
+
+- $\beta_{diff_origin}$: We expect the median price in livers to decrease by 58%(with a confidence interval of (50%,65%)) when the nationality listed in the catalogue is different from the painter's.
+- $\beta_{lrgfont}$: We expect the median price in livers to to increase by 355%(with a confidence interval of (249%,494%)) when the dealer devotes an additional paragraph to the painting in large font.
+- $\beta_{prevcoll}$: We expect the median price in livers to to increase by 246%(with a confidence interval of (148%,383%)) if the previous owner is mentioned.
+- Coefficients for endbuyer: 
+  1. $\beta_{endbuyerB}$: We expect the median price in livers to increase by 335.2% (with a confidence interval of (103.2%, 832.3%)) when the endbuyer is also a buyer.
+  2. $\beta_{endbuyerC}$: We expect the median price in livers to increase by 343.1% (with a confidence interval of (252.9%, 456.3%)) when the endbuyer is a collector.
+  3. $\beta_{endbuyerD}$: We expect the median price in livers to increase by 200% (with a confidence interval of (145.9%, 266%)) when the endbuyer is a dealer.
+  4. $\beta_{endbuyerE}$: We expect the median price in livers to increase by 27.2% (with a confidence interval of (-4.9%, 69.9%)) when the endbuyer is an expert.
+  5. $\beta_{endbuyerU}$: We expect the median price in livers to increase by 37.6% (with a confidence interval of (6%, 78.7%)) when the endbuyer is unknown.
+
+## Painting Recommendations
+
+To find the most valuable paintings and to make a recommendation to the art historian, we look at the results of our final model.  
+Paintings where the dealer had a description in large font and the previous owner was mentioned, seem to be much more valuable than those which didn't. The painting was more valuable if the dealer had mentioned engravings done after the painting. Apart from these, the painting was more valuable if the painting was noted for its highly polished finishing, had a description that mentioned a genre scene other than a peasant scene and had landscape elements mentioned in its description.
+
+Since, the data is historic, we have details of the buyers of the paintings as well. It seems that if the end buyer was a normal buyer or a collector, then the painting was likely to be more valuable(more than 4 times), it was more valuable if the buyer was a dealer as well(about 3 times). The painting was likely to be less valuable if the end buyer was an expert or unknown as compared to a buyer, collector or dealer but more valuable if there was absolutely no information about the buyer, not even the name.
+
+Finally, paintings which had different origins in the catalogue when compared to the origin of the artist, was suggested or sold as a pairing with another painting, was described as a portrait, had a description which mentioned still life elements or was described as a plain landscape were valued less.
+
+```{r predict final model, echo=FALSE}
+predictions = as.data.frame(
+  exp(predict(final_model, newdata=paintings_test, 
+              interval = "pred")))
+save(predictions, file="predict-test.Rdata")
+```
+
+## Findings and potential limitations
+
+Our model finds that with our current chosen variables, not adding interaction terms seems to be better to do the prediction than adding interaction terms. As for the limitations of our model, intuitively, the price of the painting may be related to the sale of the year (because if economy is better in some year, people might want to spend more money on a painting since they might have more income to spend) and dealer (because just like buying a car, different dealers have different prices even for the same products), but these are the variables that we decided not to include in our final model. Therefore, lacking these two variables may limit our model to capture as much information as possible to do the prediction. Besides, we didn't use some predictors like surface, because it has some missing values and this variable may have the potential to capture some information that other variables cannot capture. Therefore, we may miss some important information from those variables that we chose not to include. In addition, using a linear model just can't tell us which actual set of predictors are the best since it cannot account for the collinearity in the data set if the collinearity is literally presented in the predictors that are included in our final model.
+
