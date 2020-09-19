@@ -25,7 +25,7 @@ Based on EDA (part-I), we found the following potential predictors from the grap
 - `year`
 - `origin_author`
 
-We started from building a linear model and then utlized AIC criterion to reduce the complexity of the initial model. Furthermore, we use Bayesian Model Averaging to improve the accuracy. 
+We started from building a linear model and then utlized AIC criterion to reduce the complexity of the initial model. Furthermore, we use Bayesian Model Averaging (BMA) to improve the accuracy. We used lasso to aviod overfitting. 
 
 #### Model Evaluation
 
@@ -58,6 +58,4 @@ We believe this model is reasonable due to its large improvement over the null m
 
 If we just want to focus on the features of the paintings and not the people involved, the best features for a painting to have are highly polished finishing, an additional paragraph and engravings done after the painting. The worst features a painting could have are if it is described as a plain landscape, if it is described as a portrait and if its description indicates still life elements. It would be advisable to look for the presence(or absence) of these features to get an idea about the price, however, our model also includes the effects of the people involved in the sale, so we need to be careful if we look at these features on their own. A model to just predict the price of the painting using the features may be better if we only want to look at their effects, but this model would not consider facts such as the reputation of the artist or the dealer etc.
 
-On the old test dataset, we tried various different models including tree models and found that using BMA followed by lasso on the best predictive model gave us a model that could give us reasonable insight into the training data while also not poorly predicting on the test data. 
-
-On the new dataset, we used just the BMA model without adding any constraints using lasso. If we had more time, we could have tested tree models like random forests to see if the results are any better. Since, we are just using categorical variables in our model anyway, a tree model might be better suited to this problem in terms of predictions since it can capture many more interactions than a linear model can. The BMA model is still useful as it can give easily interpretable results and we can compare the effects of various predictors.
+On the test set, we used just the BMA model without adding any constraints using lasso. If we had more time, we could have tested tree models like random forests to see if the results are any better. Since, we are just using categorical variables in our model anyway, a tree model might be better suited to this problem in terms of predictions since it can capture many more interactions than a linear model can. The BMA model is still useful as it can give easily interpretable results and we can compare the effects of various predictors.
