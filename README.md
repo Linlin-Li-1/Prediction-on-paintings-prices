@@ -29,7 +29,7 @@ We started from building a linear model and then utlized AIC criterion to reduce
 
 #### Model Evaluation
 
-Our model is explaining approximately 66% of the variation in the log price of paintings. It is important to note that an $R^2$ cannot be used in a vacuum to tell if the model is good or bad, but it's useful to note. We observe an RMSE of 1538.9, and a coverage of 0.956(using a 95% prediction interval). As stated previously from the residual plot, it looks like all of the assumptions for MLR have been satisfied, so our standard errors + confidence intervals will be appropriate.
+Our model is explaining approximately 66% of the variation in the log price of paintings. It is important to note that an R^2 cannot be used in a vacuum to tell if the model is good or bad, but it's useful to note. We observe an RMSE of 1538.9, and a coverage of 0.956(using a 95% prediction interval). As stated previously from the residual plot, it looks like all of the assumptions for MLR have been satisfied, so our standard errors + confidence intervals will be appropriate.
 
 #### Model Testing
 
