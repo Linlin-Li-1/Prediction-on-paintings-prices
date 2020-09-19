@@ -25,7 +25,7 @@ Based on EDA (part-I), we found the following potential predictors from the grap
 - `year`
 - `origin_author`
 
-We stated from building a linear model with some transformed variables. We then utlized AIC criterion to reduce the complexity of the initial model. Furthermore, we use Bayesian Model Averaging to improve the accuracy. 
+We started from building a linear model and then utlized AIC criterion to reduce the complexity of the initial model. Furthermore, we use Bayesian Model Averaging to improve the accuracy. 
 
 #### Model Evaluation
 
