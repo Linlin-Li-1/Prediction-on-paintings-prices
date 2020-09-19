@@ -6,5 +6,3 @@ Author:
 - Bingruo Wu
 - Cole Juracek
 - Vidvat Ramachandran
-
-
